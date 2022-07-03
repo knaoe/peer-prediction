@@ -9,9 +9,10 @@ contract PeerPredictor {
         address id;
         string name; // short name
         int8 reputation;
-        uint last_update;
+        uint lastUpdate;
     }
 
+    // TODO: consider creating Task struct for each Job to support more complex case.
     struct Job {
         uint id;
         string title;
@@ -19,6 +20,7 @@ contract PeerPredictor {
         address raterId;
         address referenceRaterId;
         bool isRated;
+        bool isReferenceRated;
     }
 
     struct Rate {
@@ -34,7 +36,9 @@ contract PeerPredictor {
     mapping(address => Job[]) public assignedJobs;
     Job[] public jobs;
 
+    error YouAreNotRaterOfThisJob();
     error RatingAlreadyEnded();
+    error NotEnoughRating();
 
     constructor(
         uint ratingTime,
@@ -47,7 +51,7 @@ contract PeerPredictor {
             rater.id = raterAddresses[i];
             rater.name = raterNames[i];
             rater.reputation = 0;
-            rater.last_update = block.timestamp;
+            rater.lastUpdate = block.timestamp;
             raters[rater.id] = rater;
         }
         console.log("Added raters:", raterAddresses.length);
@@ -119,14 +123,21 @@ contract PeerPredictor {
             job.referenceRaterId = rater.id;
             job.isRated = false;
             jobs.push(job);
+            assignedJobs[rater.id].push(job);
+            assignedJobs[referenceRater.id].push(job);
         }
+        console.log(jobs.length, " jobs created");
     }
 
-    function getMyJobs() public view returns (Job[] memory myJobs) {
+    function getMyJobs() public view returns (Job[] memory) {
         return assignedJobs[msg.sender];
     }
 
-    //
+    function getMyReputation() public view returns (int8) {
+        return raters[msg.sender].reputation;
+    }
+
+    // rater should rate assigned job until [ratingEndTime].
     function rate(uint jobId, uint8 value) external {
         if (block.timestamp > ratingEndTime) {
             revert RatingAlreadyEnded();
@@ -134,15 +145,19 @@ contract PeerPredictor {
 
         address raterId = msg.sender;
         Job memory job = jobs[jobId];
-        require(job.raterId == raterId, "You are not the rater of this job");
-        require(!job.isRated, "You have already rated this job");
-
-        if (job.referenceRaterId == raterId) {
-            referenceRates[raterId] = Rate(raterId, value);
-        } else {
+        if (job.raterId == raterId) {
+            require(!job.isRated, "You have already rated this job");
+            job.isRated = true;
             rates[raterId] = Rate(raterId, value);
+        } else if (job.referenceRaterId == raterId) {
+            require(!job.isReferenceRated, "You have already rated this job");
+            referenceRates[raterId] = Rate(raterId, value);
+            job.isReferenceRated = true;
+        } else {
+            revert YouAreNotRaterOfThisJob();
         }
-        job.isRated = true;
+
+        jobs[jobId] = job;
 
         if (canFinish()) {
             finalize();
@@ -152,7 +167,7 @@ contract PeerPredictor {
     // Check whether all raters finished there rating or not
     function canFinish() public view returns (bool finished) {
         for (uint i = 0; i < jobs.length; i++) {
-            if (jobs[i].isRated == false) {
+            if (jobs[i].isRated == false || jobs[i].isReferenceRated == false) {
                 return false;
             }
         }
@@ -160,6 +175,9 @@ contract PeerPredictor {
     }
 
     function finalize() public {
+        if (!canFinish()) {
+            revert NotEnoughRating();
+        }
         calculateReputationOfAllAndSet();
     }
 
@@ -195,7 +213,7 @@ contract PeerPredictor {
             // reputation can be 1, 0 or -1
             Rater memory rater = raters[job.raterId];
             rater.reputation = int8(aggreementScore) - int8(statisticScore);
-            rater.last_update = block.timestamp;
+            rater.lastUpdate = block.timestamp;
             raters[rater.id] = rater;
             console.log("Reputation of", rater.name, "is", rater.reputation);
         }
