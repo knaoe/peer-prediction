@@ -88,16 +88,17 @@ contract PeerPredictor {
     // job3: target: 0xD, rater: 0xA, referenceRater: 0xB
     function createAndAssignJobs(address[] memory raterAddresses) internal {
         console.log("Creating jobs");
+        uint raterCount = raterAddresses.length;
+        uint caseNumber = random(1, raterCount); // 1 <= caseNumber <= raterCount
+        console.log("caseNumber: ", caseNumber);
         for (uint i = 0; i < raterAddresses.length; i++) {
-            uint raterCount = raterAddresses.length;
             Rater memory target = raters[raterAddresses[i]];
 
-            uint caseNumber = random(1, raterCount);
             Rater memory rater = raters[
-                raterAddresses[caseNumber % raterCount]
+                raterAddresses[(i + caseNumber) % raterCount]
             ];
             Rater memory referenceRater = raters[
-                raterAddresses[(caseNumber + 1) % raterCount]
+                raterAddresses[(i + caseNumber + 1) % raterCount]
             ];
 
             Job memory job;
@@ -105,7 +106,11 @@ contract PeerPredictor {
             job.title = string.concat(
                 "Until ",
                 Strings.toString(ratingEndTime),
-                "(epoch time), you will observe ",
+                "(epoch time), you(",
+                rater.name,
+                " and ",
+                referenceRater.name,
+                ") will observe ",
                 target.name,
                 "'s work and give him/her a '0' if he/she does not fit the culture of this organization, or a '1' if he/she is fine."
             );
@@ -120,7 +125,7 @@ contract PeerPredictor {
                 Strings.toHexString(referenceRater.id)
             );
             job.raterId = rater.id;
-            job.referenceRaterId = rater.id;
+            job.referenceRaterId = referenceRater.id;
             job.isRated = false;
             jobs.push(job);
             assignedJobs[rater.id].push(job);
@@ -129,12 +134,20 @@ contract PeerPredictor {
         console.log(jobs.length, " jobs created");
     }
 
-    function getMyJobs() public view returns (Job[] memory) {
-        return assignedJobs[msg.sender];
+    function getJobCount() public view returns (uint) {
+        return jobs.length;
     }
 
-    function getMyReputation() public view returns (int8) {
-        return raters[msg.sender].reputation;
+    function getJobs() public view returns (Job[] memory) {
+        return jobs;
+    }
+
+    function jobsOf(address raterId) public view returns (Job[] memory) {
+        return assignedJobs[raterId];
+    }
+
+    function reputationOf(address raterId) public view returns (int8) {
+        return raters[raterId].reputation;
     }
 
     // rater should rate assigned job until [ratingEndTime].
@@ -142,9 +155,12 @@ contract PeerPredictor {
         if (block.timestamp > ratingEndTime) {
             revert RatingAlreadyEnded();
         }
+        console.log("rating jobId: ", jobId, " value: ", value);
 
         address raterId = msg.sender;
         Job memory job = jobs[jobId];
+        console.log("job raterId: ", job.raterId);
+        console.log("job refereanceRaterId: ", job.referenceRaterId);
         if (job.raterId == raterId) {
             require(!job.isRated, "You have already rated this job");
             job.isRated = true;
@@ -154,6 +170,7 @@ contract PeerPredictor {
             referenceRates[raterId] = Rate(raterId, value);
             job.isReferenceRated = true;
         } else {
+            console.log("msg.sender: ", msg.sender);
             revert YouAreNotRaterOfThisJob();
         }
 
@@ -215,7 +232,7 @@ contract PeerPredictor {
             rater.reputation = int8(aggreementScore) - int8(statisticScore);
             rater.lastUpdate = block.timestamp;
             raters[rater.id] = rater;
-            console.log("Reputation of", rater.name, "is", rater.reputation);
+            // console.log("Reputation of", rater.name, "is", rater.reputation);
         }
     }
 
